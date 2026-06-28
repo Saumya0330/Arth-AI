@@ -83,7 +83,7 @@ def show_source_panel(state: dict):
                 val = fs
                 for key in path.split("."):
                     val = val.get(key, "—") if isinstance(val, dict) else "—"
-                rows.append({"Field": path, "Value": val, "Source": "✅ regex"})
+                rows.append({"Field": path, "Value": str(val), "Source": "✅ regex"})
             st.table(rows)
 
     if llm_fields:
@@ -94,7 +94,7 @@ def show_source_panel(state: dict):
                 val = fs
                 for key in path.split("."):
                     val = val.get(key, "—") if isinstance(val, dict) else "—"
-                rows.append({"Field": path, "Value": val, "Source": "⚠️ LLM"})
+                rows.append({"Field": path, "Value": str(val), "Source": "⚠️ LLM"})
             st.table(rows)
             st.caption("These values were extracted by the LLM from OCR text. "
                        "Cross-check against the source PDF before signing the report.")

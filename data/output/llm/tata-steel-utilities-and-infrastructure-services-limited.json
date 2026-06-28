@@ -44,7 +44,7 @@
   },
   "profit_and_loss": {
     "revenue_from_operations": 162725.0,
-    "other_income": 13394.0,
+    "other_income": 4856.0,
     "cost_of_materials": null,
     "employee_benefits_expense": 17372.0,
     "finance_costs": 1048.0,
@@ -55,13 +55,31 @@
     "profit_after_tax": 13380.0
   },
   "audit_observations": [
-    "The company has a significant increase in profit after tax, which may be due to higher dividend received in the year and prior year tax.",
-    "The company has a high amount of trade receivables, which may indicate a high credit risk.",
-    "The company has a significant amount of deferred tax assets, which may indicate a potential tax benefit in the future.",
-    "The company's cash and cash equivalents have increased significantly, which may indicate a strong liquidity position.",
-    "The company's debt service coverage ratio has increased, which may indicate a reduced debt burden."
+    "The company has a significant amount of trade receivables, with Rs. 2673 lacs considered doubtful of recovery.",
+    "The company's cash and cash equivalents have increased by Rs. 27 lacs, which may indicate a positive cash flow.",
+    "The company's depreciation expense is Rs. 2560 lacs, which may indicate a significant amount of assets being used.",
+    "The company's finance costs are Rs. 1048 lacs, which may indicate a significant amount of borrowing.",
+    "The company's tax expense is Rs. 2262 lacs, which may indicate a significant tax liability."
   ],
   "source_file": "tata-steel-utilities-and-infrastructure-services-limited.pdf",
   "extraction_method": "llm",
-  "extraction_confidence": 0.8
+  "extraction_confidence": 0.8,
+  "_sources": {
+    "company_name": "regex",
+    "financial_year_end": "regex",
+    "auditor_name": "regex",
+    "balance_sheet.current_liabilities.trade_payables": "regex",
+    "balance_sheet.non_current_assets.fixed_assets_tangible": "regex",
+    "balance_sheet.current_assets.inventories": "regex",
+    "balance_sheet.current_assets.cash_and_cash_equivalents": "regex",
+    "profit_and_loss.revenue_from_operations": "regex",
+    "profit_and_loss.employee_benefits_expense": "regex",
+    "profit_and_loss.finance_costs": "regex",
+    "profit_and_loss.depreciation": "regex",
+    "balance_sheet.current_assets.trade_receivables": "llm",
+    "profit_and_loss.other_income": "llm",
+    "profit_and_loss.tax_expense": "llm",
+    "profit_and_loss.profit_after_tax": "llm",
+    "extraction_confidence": "llm"
+  }
 }
