@@ -6,3 +6,5 @@ token.json
 data/arth_ai_sessions.db*
 data/output/
 data/input/
+frontend/node_modules/
+frontend/dist/
