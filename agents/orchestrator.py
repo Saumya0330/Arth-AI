@@ -12,6 +12,7 @@ Graph:
        → END
 """
 
+import sqlite3
 import logging
 from pathlib import Path
 
@@ -28,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH  = BASE_DIR / "data" / "arth_ai_sessions.db"
+
+# Persistent connection — must stay open for the lifetime of the app
+# check_same_thread=False is safe here because Streamlit runs single-threaded
+_db_conn = None
+
+def _get_checkpointer() -> SqliteSaver:
+    global _db_conn
+    if _db_conn is None:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _db_conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        logger.info(f"[Orchestrator] SQLite session DB opened: {DB_PATH}")
+    return SqliteSaver(_db_conn)
 
 
 # ── Human interrupt nodes ──────────────────────────────────────────────────────
@@ -68,7 +81,7 @@ def after_math(state: AuditState) -> str:
 
 # ── Graph builder ──────────────────────────────────────────────────────────────
 
-def build_graph(db_path: str):
+def build_graph():
     graph = StateGraph(AuditState)
 
     graph.add_node("math_validator",      run_math_validator)
@@ -87,9 +100,8 @@ def build_graph(db_path: str):
     graph.add_edge("report_drafter",      "human_review_report")
     graph.add_edge("human_review_report", END)
 
-    checkpointer = SqliteSaver.from_conn_string(db_path)
     return graph.compile(
-        checkpointer=checkpointer,
+        checkpointer=_get_checkpointer(),
         interrupt_before=["human_review_flags", "human_review_report"],
     )
 
@@ -101,9 +113,8 @@ _graph = None
 def get_graph():
     global _graph
     if _graph is None:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _graph = build_graph(str(DB_PATH))
-        logger.info(f"[Orchestrator] Graph built. Session DB: {DB_PATH}")
+        _graph = build_graph()
+        logger.info("[Orchestrator] Graph compiled with SQLite checkpointer.")
     return _graph
 
 
