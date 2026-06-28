@@ -71,6 +71,8 @@ if not st.button("▶ Extract & Start Audit Pipeline", type="primary", use_conta
 with st.status("Running extraction pipeline...", expanded=True) as status:
     import warnings; warnings.filterwarnings("ignore")
 
+    # Deterministic thread_id — same file always gets same session
+    # This means sessions survive Streamlit restarts
     st.write("**Module 1:** Extracting text from PDF...")
     from module1.extractor import get_full_text
     from module1.parser import parse_financial_text
@@ -94,10 +96,9 @@ with st.status("Running extraction pipeline...", expanded=True) as status:
 
     st.write("**Orchestrator:** Running Math Validator + Compliance Checker...")
     from agents.orchestrator import get_graph, create_initial_state
-    import uuid
 
     graph     = get_graph()
-    thread_id = f"{dest.stem}-{uuid.uuid4().hex[:8]}"
+    thread_id = dest.stem  # deterministic — same file = same session
     config    = {"configurable": {"thread_id": thread_id}}
     init_state = create_initial_state(completed, raw_text)
 
