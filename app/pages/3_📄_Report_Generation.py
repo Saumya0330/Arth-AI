@@ -32,6 +32,8 @@ with st.sidebar:
 - Download final .md report
     """)
     st.divider()
+    from app.rag_chat import render_rag_chat
+    render_rag_chat()
     thread_id = st.session_state.get("thread_id")
     if thread_id:
         st.info(f"Session:\n`{thread_id}`")

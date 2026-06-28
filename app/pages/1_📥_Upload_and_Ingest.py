@@ -37,6 +37,8 @@ with st.sidebar:
             for k in ["thread_id", "source_file"]:
                 st.session_state.pop(k, None)
             st.rerun()
+    from app.rag_chat import render_rag_chat
+    render_rag_chat()
 
 st.title("📥 Step 1 — Upload & Ingest")
 st.caption("Upload a company financial statement PDF to begin the audit pipeline.")
@@ -151,6 +153,38 @@ if math:
             st.write(f"{icon} **{c['check']}**")
             if not c.get("passed") and c.get("difference") is not None:
                 st.caption(f"  Expected: {c.get('expected')}  |  Got: {c.get('actual')}  |  Diff: {c.get('difference')}")
+
+# ── Source audit trail ─────────────────────────────────────────────────────────
+sources = completed.get("_sources", {})
+if sources:
+    st.divider()
+    st.subheader("📋 Field Source Audit Trail")
+    regex_fields = {k: v for k, v in sources.items() if v == "regex"}
+    llm_fields   = {k: v for k, v in sources.items() if v == "llm"}
+
+    sc1, sc2 = st.columns(2)
+    sc1.metric("✅ Regex-extracted (trusted)", len(regex_fields))
+    sc2.metric("⚠️ LLM-extracted (verify)", len(llm_fields))
+
+    if regex_fields:
+        with st.expander(f"✅ {len(regex_fields)} fields extracted by regex — deterministic, no LLM", expanded=True):
+            rows = []
+            for path in sorted(regex_fields):
+                val = completed
+                for key in path.split("."):
+                    val = val.get(key, "—") if isinstance(val, dict) else "—"
+                rows.append({"Field": path, "Value": str(val), "Source": "✅ regex"})
+            st.table(rows)
+
+    if llm_fields:
+        with st.expander(f"⚠️ {len(llm_fields)} fields filled by LLM — cross-check against source PDF"):
+            rows = []
+            for path in sorted(llm_fields):
+                val = completed
+                for key in path.split("."):
+                    val = val.get(key, "—") if isinstance(val, dict) else "—"
+                rows.append({"Field": path, "Value": str(val), "Source": "⚠️ LLM"})
+            st.table(rows)
 
 with st.expander("📋 Full extracted JSON"):
     st.json(completed)
