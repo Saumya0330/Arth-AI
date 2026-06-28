@@ -1,0 +1,6 @@
+.env
+VectorDB/
+__pycache__/
+.venv/
+data/output/
+token.json
