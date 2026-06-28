@@ -1,0 +1,83 @@
+{
+  "company_name": "TATA STEEL UTILITIES AND INFRASTRUCTURE SERVICES LIMITED",
+  "cin": null,
+  "pan": null,
+  "registered_address": null,
+  "financial_year_end": "2025-03-31",
+  "currency": "INR",
+  "auditor_name": "Price Waterhouse & Co",
+  "auditor_firm_reg": null,
+  "balance_sheet": {
+    "shareholders_equity": {
+      "share_capital": null,
+      "reserves_and_surplus": null,
+      "money_received_against_share_warrants": null
+    },
+    "non_current_liabilities": {
+      "long_term_borrowings": null,
+      "deferred_tax_liabilities": null,
+      "other_long_term_liabilities": null,
+      "long_term_provisions": null
+    },
+    "current_liabilities": {
+      "short_term_borrowings": null,
+      "trade_payables": 15.0,
+      "other_current_liabilities": null,
+      "short_term_provisions": null
+    },
+    "non_current_assets": {
+      "fixed_assets_tangible": 3.0,
+      "fixed_assets_intangible": null,
+      "capital_wip": null,
+      "long_term_investments": null,
+      "deferred_tax_assets": null,
+      "long_term_loans_and_advances": null,
+      "other_non_current_assets": null
+    },
+    "current_assets": {
+      "inventories": 11.0,
+      "trade_receivables": 2673.0,
+      "cash_and_cash_equivalents": 27.0,
+      "short_term_loans_and_advances": null,
+      "other_current_assets": null
+    }
+  },
+  "profit_and_loss": {
+    "revenue_from_operations": 162725.0,
+    "other_income": 4856.0,
+    "cost_of_materials": null,
+    "employee_benefits_expense": 17372.0,
+    "finance_costs": 1048.0,
+    "depreciation": 2560.0,
+    "other_expenses": null,
+    "exceptional_items": null,
+    "tax_expense": 2262.0,
+    "profit_after_tax": 13380.0
+  },
+  "audit_observations": [
+    "The company has a significant increase in profit after tax, which may be due to higher dividend received in the year and prior year tax.",
+    "The company has a high amount of trade receivables, which may indicate a high credit risk.",
+    "The company has a significant amount of deferred tax assets, which may indicate a potential tax benefit in the future.",
+    "The company's operating cycle is 12 months, which may indicate a relatively long period for realization of assets and settlement of liabilities.",
+    "The company has a significant increase in cash and cash equivalents, which may indicate a strong liquidity position."
+  ],
+  "source_file": "tata-steel-utilities-and-infrastructure-services-limited.pdf",
+  "extraction_method": "llm",
+  "extraction_confidence": 0.8,
+  "anomaly_flags": [
+    {
+      "rule_id": "DT-002",
+      "severity": "warning",
+      "field": "profit_and_loss.finance_costs",
+      "description": "Finance costs of 1,048.00 are reported but no borrowings were extracted. Off-balance-sheet debt or extraction gap.",
+      "expected": "Corresponding borrowings on balance sheet",
+      "actual": "Borrowings = null/0"
+    }
+  ],
+  "anomaly_summary": {
+    "total": 1,
+    "critical": 0,
+    "warning": 1,
+    "info": 0
+  }
+}

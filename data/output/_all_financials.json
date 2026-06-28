@@ -1,0 +1,62 @@
+[
+  {
+    "company_name": "TATA STEEL UTILITIES AND INFRASTRUCTURE SERVICES LIMITED",
+    "cin": null,
+    "pan": null,
+    "registered_address": null,
+    "financial_year_end": "2025-03-31",
+    "currency": "INR",
+    "auditor_name": "in our report of even date.\nFor Price Waterhouse & Co",
+    "auditor_firm_reg": null,
+    "balance_sheet": {
+      "shareholders_equity": {
+        "share_capital": null,
+        "reserves_and_surplus": null,
+        "money_received_against_share_warrants": null
+      },
+      "non_current_liabilities": {
+        "long_term_borrowings": null,
+        "deferred_tax_liabilities": null,
+        "other_long_term_liabilities": null,
+        "long_term_provisions": null
+      },
+      "current_liabilities": {
+        "short_term_borrowings": null,
+        "trade_payables": 15.0,
+        "other_current_liabilities": null,
+        "short_term_provisions": null
+      },
+      "non_current_assets": {
+        "fixed_assets_tangible": 3.0,
+        "fixed_assets_intangible": null,
+        "capital_wip": null,
+        "long_term_investments": null,
+        "deferred_tax_assets": null,
+        "long_term_loans_and_advances": null,
+        "other_non_current_assets": null
+      },
+      "current_assets": {
+        "inventories": 11.0,
+        "trade_receivables": null,
+        "cash_and_cash_equivalents": 27.0,
+        "short_term_loans_and_advances": null,
+        "other_current_assets": null
+      }
+    },
+    "profit_and_loss": {
+      "revenue_from_operations": 162725.0,
+      "other_income": null,
+      "cost_of_materials": null,
+      "employee_benefits_expense": 17372.0,
+      "finance_costs": 1048.0,
+      "depreciation": 2560.0,
+      "other_expenses": null,
+      "exceptional_items": null,
+      "tax_expense": null,
+      "profit_after_tax": null
+    },
+    "source_file": "tata-steel-utilities-and-infrastructure-services-limited.pdf",
+    "extraction_method": "ocr",
+    "extraction_confidence": 0.6
+  }
+]
