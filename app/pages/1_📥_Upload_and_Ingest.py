@@ -1,143 +1,157 @@
 """
 अर्थAI — Page 1: Upload & Ingest
-Runs Module 1 (extraction) + Module 2 (LLM completion) with auditor confirmation.
+Extracts text from PDF, runs Module 1+2, then kicks off the
+orchestrator which runs math_validator + compliance_checker
+and pauses waiting for auditor flag review.
 """
 
 import streamlit as st
-import json
-import shutil
+import json, sys
 from pathlib import Path
-import sys
 
 BASE_DIR  = Path(__file__).resolve().parent.parent.parent
-INPUT_DIR = BASE_DIR / "data" / "input"
-OUT_DIR   = BASE_DIR / "data" / "output"
 sys.path.insert(0, str(BASE_DIR))
+
+INPUT_DIR = BASE_DIR / "data" / "input"
+OUT_LLM   = BASE_DIR / "data" / "output" / "llm"
 
 st.set_page_config(page_title="Upload & Ingest · अर्थAI", page_icon="📥", layout="wide")
 
 with st.sidebar:
     st.title("अर्थAI")
-    st.caption("Step 1 of 5")
+    st.caption("Step 1 — Upload & Ingest")
     st.divider()
     st.markdown("""
-**What happens here:**
-- Upload company financial PDF
-- Module 1 extracts text (OCR if scanned)
-- Module 2 uses LLM to fill in all financial fields
-- You review and confirm before proceeding
+**What runs here:**
+- PDF text extraction (OCR if scanned)
+- LLM fills in financial fields (Module 2)
+- Orchestrator starts:
+  - Agent 1 validates all arithmetic
+  - Agent 2 checks compliance rules
+- Graph pauses for your flag review
     """)
+    st.divider()
+    if st.session_state.get("thread_id"):
+        st.success(f"Active session:\n`{st.session_state['thread_id']}`")
+        if st.button("🗑️ Clear session"):
+            for k in ["thread_id", "source_file"]:
+                st.session_state.pop(k, None)
+            st.rerun()
 
 st.title("📥 Step 1 — Upload & Ingest")
-st.caption("Upload a company's financial statement PDF to begin the audit pipeline.")
+st.caption("Upload a company financial statement PDF to begin the audit pipeline.")
 st.divider()
 
-# ── Upload ─────────────────────────────────────────────────────────────────────
 uploaded = st.file_uploader(
     "Upload Financial Statement PDF",
     type=["pdf"],
-    help="Supports both text-based and scanned PDFs. Scanned PDFs use OCR automatically."
+    help="Supports text-based and scanned (OCR) PDFs.",
 )
 
-if uploaded:
-    # Save to data/input/
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
-    dest = INPUT_DIR / uploaded.name
-    with open(dest, "wb") as f:
-        f.write(uploaded.getbuffer())
-    st.success(f"✅ Uploaded: **{uploaded.name}** ({uploaded.size/1024:.1f} KB)")
+if not uploaded:
+    st.stop()
 
+# ── Save PDF ───────────────────────────────────────────────────────────────────
+INPUT_DIR.mkdir(parents=True, exist_ok=True)
+dest = INPUT_DIR / uploaded.name
+dest.write_bytes(uploaded.getbuffer())
+st.success(f"✅ Uploaded: **{uploaded.name}** ({uploaded.size/1024:.1f} KB)")
+
+llm_path   = OUT_LLM / (dest.stem + ".json")
+rerun_flag = st.checkbox("Re-run extraction (overwrite existing)", value=not llm_path.exists())
+
+if not st.button("▶ Extract & Start Audit Pipeline", type="primary", use_container_width=True):
+    if llm_path.exists() and not rerun_flag:
+        st.info("ℹ️ Extraction already done. Uncheck 'Re-run' and click the button to use cached data.")
+    st.stop()
+
+# ── Extraction ─────────────────────────────────────────────────────────────────
+with st.status("Running extraction pipeline...", expanded=True) as status:
+    import warnings; warnings.filterwarnings("ignore")
+
+    st.write("**Module 1:** Extracting text from PDF...")
+    from module1.extractor import get_full_text
+    from module1.parser import parse_financial_text
+    raw_text, method = get_full_text(str(dest))
+    st.write(f"  ✅ {len(raw_text):,} chars extracted via **{method}**")
+
+    fs_m1 = parse_financial_text(raw_text, source_file=uploaded.name, extraction_method=method)
+    m1_dict = fs_m1.to_dict()
+    (BASE_DIR / "data" / "output").mkdir(parents=True, exist_ok=True)
+    (BASE_DIR / "data" / "output" / (dest.stem + ".json")).write_text(
+        json.dumps(m1_dict, indent=2, default=str))
+
+    st.write("**Module 2:** LLM completing financial fields (Groq)...")
+    from module2.reasoning import complete_financial_json
+    completed = complete_financial_json(m1_dict, raw_text, source_file=uploaded.name)
+    OUT_LLM.mkdir(parents=True, exist_ok=True)
+    llm_path.write_text(json.dumps(completed, indent=2, default=str))
+    st.write(f"  ✅ LLM confidence: **{completed.get('extraction_confidence', 0):.0%}**")
+
+    st.write("**Orchestrator:** Running Math Validator + Compliance Checker...")
+    from agents.orchestrator import get_graph, create_initial_state
+    import uuid
+
+    graph     = get_graph()
+    thread_id = f"{dest.stem}-{uuid.uuid4().hex[:8]}"
+    config    = {"configurable": {"thread_id": thread_id}}
+    init_state = create_initial_state(completed, raw_text)
+
+    result = graph.invoke(init_state, config)
+
+    st.session_state["thread_id"]   = thread_id
+    st.session_state["source_file"] = uploaded.name
+    st.write(f"  ✅ Graph paused at: **{list(graph.get_state(config).next)}**")
+    status.update(label="✅ Ready for your review!", state="complete")
+
+# ── Show extraction summary ────────────────────────────────────────────────────
+st.divider()
+st.subheader("📊 Extraction Summary")
+
+col_l, col_r = st.columns(2)
+with col_l:
+    st.markdown("**Company Information**")
+    st.write(f"**Name:** {completed.get('company_name', '—')}")
+    st.write(f"**CIN:** {completed.get('cin', '—')}")
+    st.write(f"**FY End:** {completed.get('financial_year_end', '—')}")
+    st.write(f"**Auditor:** {completed.get('auditor_name', '—')}")
+    conf = completed.get("extraction_confidence", 0)
+    st.progress(conf, text=f"Extraction confidence: {conf:.0%}")
+
+with col_r:
+    st.markdown("**Key Financials (₹)**")
+    pl = completed.get("profit_and_loss", {})
+    ca = completed.get("balance_sheet", {}).get("current_assets", {})
+    st.write(f"**Revenue:** {pl.get('revenue_from_operations', '—')}")
+    st.write(f"**PAT:** {pl.get('profit_after_tax', '—')}")
+    st.write(f"**Cash:** {ca.get('cash_and_cash_equivalents', '—')}")
+
+# Math report quick view
+math = result.get("math_report", {})
+if math:
     st.divider()
+    st.subheader("🔢 Math Validation (Agent 1 — Pure Python)")
+    mc1, mc2, mc3 = st.columns(3)
+    mc1.metric("Total Checks", math.get("total_checks", 0))
+    mc2.metric("Passed", math.get("passed", 0))
+    failed = math.get("failed", 0)
+    mc3.metric("Failed", failed, delta=f"-{failed}" if failed else None,
+               delta_color="inverse")
 
-    # Check if already processed
-    llm_out = OUT_DIR / "llm" / (dest.stem + ".json")
-    already_done = llm_out.exists()
+    if math.get("has_critical_errors"):
+        st.error("⚠️ Critical arithmetic errors detected — see Anomaly Detection page.")
+    else:
+        st.success("✅ All math checks passed.")
 
-    if already_done:
-        st.info("ℹ️ This file has already been processed. You can re-run or continue.")
+    with st.expander("View all math checks"):
+        for c in math.get("checks", []):
+            icon = "✅" if c.get("passed") else ("🔴" if c.get("critical") else "🟡")
+            st.write(f"{icon} **{c['check']}**")
+            if not c.get("passed") and c.get("difference") is not None:
+                st.caption(f"  Expected: {c.get('expected')}  |  Got: {c.get('actual')}  |  Diff: {c.get('difference')}")
 
-    col1, col2 = st.columns(2)
-    run_m1 = col1.button("▶ Run Module 1 (Extract)", use_container_width=True,
-                         disabled=already_done and not col2.button("🔄 Re-run", use_container_width=True))
+with st.expander("📋 Full extracted JSON"):
+    st.json(completed)
 
-    if run_m1 or (already_done and st.session_state.get("rerun")):
-        with st.status("Running extraction pipeline...", expanded=True) as status:
-
-            st.write("**Module 1:** Extracting text from PDF...")
-            from module1.extractor import get_full_text
-            from module1.parser import parse_financial_text
-            import time
-
-            raw_text, method = get_full_text(str(dest))
-            st.write(f"  ✅ Extracted {len(raw_text):,} characters via **{method}**")
-
-            fs = parse_financial_text(raw_text, source_file=uploaded.name, extraction_method=method)
-            m1_dict = fs.to_dict()
-
-            m1_path = OUT_DIR / (dest.stem + ".json")
-            m1_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(m1_path, "w") as f:
-                json.dump(m1_dict, f, indent=2, default=str)
-            st.write(f"  ✅ Module 1 JSON saved")
-
-            st.write("**Module 2:** Running LLM completion (Groq Llama 3.3 70B)...")
-            from module2.reasoning import complete_financial_json
-            completed = complete_financial_json(m1_dict, raw_text, source_file=uploaded.name)
-
-            llm_path = OUT_DIR / "llm" / (dest.stem + ".json")
-            llm_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(llm_path, "w") as f:
-                json.dump(completed, f, indent=2, default=str)
-            st.write("  ✅ LLM extraction complete")
-            status.update(label="✅ Extraction complete!", state="complete")
-
-        # ── Auditor Review ─────────────────────────────────────────────────────
-        st.divider()
-        st.subheader("🔎 Review Extracted Data")
-        st.caption("Verify the extracted financial data before proceeding to anomaly detection.")
-
-        with open(llm_path) as f:
-            completed = json.load(f)
-
-        col_l, col_r = st.columns(2)
-
-        with col_l:
-            st.markdown("**Company Information**")
-            st.write(f"**Name:** {completed.get('company_name', '—')}")
-            st.write(f"**CIN:** {completed.get('cin', '—')}")
-            st.write(f"**FY End:** {completed.get('financial_year_end', '—')}")
-            st.write(f"**Auditor:** {completed.get('auditor_name', '—')}")
-            st.write(f"**Confidence:** {completed.get('extraction_confidence', 0):.0%}")
-
-        with col_r:
-            st.markdown("**Key Financials (₹)**")
-            pl = completed.get("profit_and_loss", {})
-            bs = completed.get("balance_sheet", {})
-            st.write(f"**Revenue:** {pl.get('revenue_from_operations', '—')}")
-            st.write(f"**PAT:** {pl.get('profit_after_tax', '—')}")
-            ca = bs.get("current_assets", {})
-            cl = bs.get("current_liabilities", {})
-            se = bs.get("shareholders_equity", {})
-            st.write(f"**Cash:** {ca.get('cash_and_cash_equivalents', '—')}")
-            st.write(f"**Share Capital:** {se.get('share_capital', '—')}")
-
-        with st.expander("📋 View Full Extracted JSON"):
-            st.json(completed)
-
-        if completed.get("audit_observations"):
-            st.markdown("**💡 Initial AI Observations**")
-            for obs in completed["audit_observations"]:
-                st.markdown(f"- {obs}")
-
-        st.divider()
-        st.markdown("**Does the extracted data look correct?**")
-        col_yes, col_no = st.columns(2)
-        if col_yes.button("✅ Looks good — proceed to Anomaly Detection", use_container_width=True, type="primary"):
-            st.success("Confirmed! Go to **🔍 Anomaly Detection** in the sidebar.")
-            st.balloons()
-        if col_no.button("⚠️ Data issues — flag for manual review", use_container_width=True):
-            note = st.text_area("Describe the issue (this will be logged):")
-            if note:
-                flag_path = OUT_DIR / "llm" / (dest.stem + "_review_flag.txt")
-                flag_path.write_text(note)
-                st.warning("Flagged for manual review. Logged to output folder.")
+st.divider()
+st.success(f"✅ Pipeline running! Session ID: `{thread_id}`  \nProceed to **🔍 Anomaly Detection** in the sidebar.")

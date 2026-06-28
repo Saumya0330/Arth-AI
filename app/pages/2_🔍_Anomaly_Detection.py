@@ -1,143 +1,201 @@
 """
-अर्थAI — Page 2: Anomaly Detection + RAG
-Runs Module 3 + Module 4 with auditor review of each flag.
+अर्थAI — Page 2: Anomaly Detection & Regulatory Lookup
+
+Resumes the LangGraph graph from the human_review_flags checkpoint.
+Auditor reviews each flag, marks decisions, then graph resumes:
+  Agent 3 (RAG) fetches citations only for confirmed flags.
+Graph then pauses again at human_review_report.
 """
 
 import streamlit as st
-import json
+import json, sys
 from pathlib import Path
-import sys
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(BASE_DIR))
-LLM_DIR    = BASE_DIR / "data" / "output" / "llm"
-ANOMALY_DIR = BASE_DIR / "data" / "output" / "anomaly"
-RAG_DIR    = BASE_DIR / "data" / "output" / "rag"
 
 st.set_page_config(page_title="Anomaly Detection · अर्थAI", page_icon="🔍", layout="wide")
 
 with st.sidebar:
     st.title("अर्थAI")
-    st.caption("Step 2 of 5")
+    st.caption("Step 2 — Anomaly Detection")
     st.divider()
     st.markdown("""
-**What happens here:**
-- Module 3 runs financial ratio checks
-- Benford's Law test for fraud signals
-- Module 4 retrieves relevant regulations
-  from CARO 2020, SA 700/705 + all your
-  other embedded regulatory documents
-- You review each flag before report
+**Agents running here:**
+- **Agent 2** (already ran) detected compliance flags
+- You review each flag and decide:
+  - ✅ Confirm → goes to RAG
+  - ❌ Dismiss → dropped entirely
+  - ⚡ Escalate → goes to RAG + marked urgent
+- **Agent 3 (RAG)** retrieves CARO/SA citations
+  only for your confirmed flags
     """)
+    st.divider()
+    thread_id = st.session_state.get("thread_id")
+    if thread_id:
+        st.info(f"Session:\n`{thread_id}`")
+    else:
+        st.warning("No active session.\nComplete Step 1 first.")
 
 st.title("🔍 Step 2 — Anomaly Detection & Regulatory Lookup")
 st.divider()
 
-# ── File selector ──────────────────────────────────────────────────────────────
-llm_files = sorted(LLM_DIR.glob("*.json")) if LLM_DIR.exists() else []
-if not llm_files:
-    st.warning("No processed documents found. Complete Step 1 first.")
+# ── Guard: need active session ─────────────────────────────────────────────────
+thread_id = st.session_state.get("thread_id")
+if not thread_id:
+    st.warning("⚠️ No active session found. Please complete **Step 1 — Upload & Ingest** first.")
     st.stop()
 
-names = {f.stem.replace("-", " ").title(): f for f in llm_files}
-selected_name = st.selectbox("Select a document", list(names.keys()))
-selected_file = names[selected_name]
+import warnings; warnings.filterwarnings("ignore")
+from agents.orchestrator import get_graph
 
-rag_out = RAG_DIR / selected_file.name
-already_done = rag_out.exists()
+graph  = get_graph()
+config = {"configurable": {"thread_id": thread_id}}
 
-if already_done:
-    st.info("ℹ️ Anomaly detection already run for this document.")
+# Get current graph state
+snapshot = graph.get_state(config)
+state    = snapshot.values
+current_step = state.get("current_step", "")
+next_nodes   = list(snapshot.next)
 
-if st.button("▶ Run Anomaly Detection + RAG", type="primary", use_container_width=True):
-    with open(selected_file) as f:
-        fs = json.load(f)
+# ── Already past flag review? ──────────────────────────────────────────────────
+already_past_rag = current_step in ("rag_complete", "report_drafted", "report_finalised")
+if already_past_rag:
+    st.info("ℹ️ Flag review already completed for this session.")
+    flags_with_citations = state.get("flags_with_citations", [])
+    st.subheader("Confirmed Flags with Regulatory Citations")
+    _show_cited_flags(flags_with_citations)
+    st.success("Proceed to **📄 Report Generation**.")
+    st.stop()
 
-    with st.status("Running anomaly detection...", expanded=True) as status:
-        st.write("**Module 3:** Running financial checks...")
-        from module3.anomaly import run_all_checks
-        flags = run_all_checks(fs)
+# ── Show anomaly flags from Agent 2 ───────────────────────────────────────────
+flags = state.get("anomaly_flags", [])
+math  = state.get("math_report", {})
 
-        critical = [f for f in flags if f["severity"] == "critical"]
-        warnings  = [f for f in flags if f["severity"] == "warning"]
-        st.write(f"  ✅ Found **{len(flags)}** flags  "
-                 f"(🔴 {len(critical)} critical, 🟡 {len(warnings)} warnings)")
+# Math summary banner
+if math.get("has_critical_errors"):
+    st.error(
+        f"🔴 **Agent 1 (Math Validator) found {len(math.get('critical_failures', []))} "
+        f"critical arithmetic error(s)** — these are included below."
+    )
 
-        fs["anomaly_flags"] = flags
-        fs["anomaly_summary"] = {
-            "total": len(flags), "critical": len(critical),
-            "warning": len(warnings), "info": 0
-        }
+if not flags and not math.get("has_critical_errors"):
+    st.success("✅ No compliance anomalies detected by Agent 2.")
+    if st.button("Proceed to Report Generation →", type="primary"):
+        graph.update_state(config, {"confirmed_flags": [], "auditor_flag_decisions": {}},
+                           as_node="human_review_flags")
+        graph.invoke(None, config)
+        st.success("Graph resumed. Proceed to **📄 Report Generation**.")
+    st.stop()
 
-        ANOMALY_DIR.mkdir(parents=True, exist_ok=True)
-        anomaly_path = ANOMALY_DIR / selected_file.name
-        with open(anomaly_path, "w") as f_out:
-            json.dump(fs, f_out, indent=2)
+st.subheader(f"Agent 2 found {len(flags)} compliance flag(s) — review each below")
+st.caption("For each flag: confirm to include in the report, dismiss to drop it, or escalate for urgent attention.")
 
-        st.write("**Module 4:** Retrieving regulations from VectorDB...")
-        from module4.rag import process_anomaly_flags
-        enriched = process_anomaly_flags(fs)
+# ── Per-flag review UI ─────────────────────────────────────────────────────────
+decisions = {}
+SEVERITY_ICON = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
 
-        RAG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(rag_out, "w") as f_out:
-            json.dump(enriched, f_out, indent=2)
-        st.write("  ✅ RAG citations attached to all flags")
-        status.update(label="✅ Done!", state="complete")
+# Merge math critical failures as extra flags to review
+all_display_flags = list(flags)
+for cf in math.get("critical_failures", []):
+    all_display_flags.insert(0, {
+        "rule_id":     "MATH-" + cf["check"][:10].replace(" ", "_"),
+        "severity":    "critical",
+        "field":       "balance_sheet / profit_and_loss",
+        "description": f"Arithmetic error: {cf['check']} — "
+                       f"expected {cf['expected']}, got {cf['actual']}, diff {cf['difference']}",
+        "expected":    str(cf.get("expected")),
+        "actual":      str(cf.get("actual")),
+    })
 
-# ── Show results ───────────────────────────────────────────────────────────────
-if rag_out.exists():
+for i, flag in enumerate(all_display_flags):
+    sev  = flag.get("severity", "warning")
+    icon = SEVERITY_ICON.get(sev, "🟡")
+    rule = flag.get("rule_id", f"FLAG-{i}")
+
+    with st.expander(
+        f"{icon} [{rule}]  {flag.get('description', '')[:90]}...",
+        expanded=(sev == "critical")
+    ):
+        col_l, col_r = st.columns([1, 1])
+        with col_l:
+            st.markdown("**Anomaly Details**")
+            st.write(f"**Rule ID:** `{rule}`")
+            st.write(f"**Severity:** `{sev.upper()}`")
+            st.write(f"**Field:** `{flag.get('field', '—')}`")
+            if flag.get("expected"):
+                st.write(f"**Expected:** {flag['expected']}")
+            if flag.get("actual"):
+                st.write(f"**Actual:** {flag['actual']}")
+
+        with col_r:
+            st.markdown("**Your Decision**")
+            decision = st.radio(
+                "Decision",
+                options=["✅ Confirm — include in report",
+                         "❌ Dismiss — not material",
+                         "⚡ Escalate — urgent, needs investigation"],
+                index=0,
+                key=f"decision_{i}",
+                label_visibility="collapsed",
+            )
+            note = st.text_input("Auditor note (optional)", key=f"note_{i}")
+
+        decisions[rule] = (
+            "confirm"   if "Confirm"   in decision else
+            "dismiss"   if "Dismiss"   in decision else
+            "escalate"
+        )
+
+st.divider()
+
+# ── Submit decisions + resume graph ───────────────────────────────────────────
+confirmed_count  = sum(1 for v in decisions.values() if v in ("confirm", "escalate"))
+dismissed_count  = sum(1 for v in decisions.values() if v == "dismiss")
+
+col_summary, col_btn = st.columns([2, 1])
+col_summary.markdown(
+    f"**Summary:** {confirmed_count} flag(s) will go to RAG · "
+    f"{dismissed_count} dismissed"
+)
+
+if col_btn.button("▶ Submit Decisions & Fetch Regulatory Citations",
+                   type="primary", use_container_width=True):
+    # Map decisions back onto the original (non-math) flags
+    confirmed_flags = [
+        f for f in flags
+        if decisions.get(f["rule_id"], "confirm") != "dismiss"
+    ]
+
+    with st.status("Agent 3: Fetching regulatory citations from VectorDB...",
+                   expanded=True) as status:
+        # Resume graph through human_review_flags → rag_retriever
+        graph.update_state(
+            config,
+            {"auditor_flag_decisions": decisions,
+             "confirmed_flags": confirmed_flags},
+            as_node="human_review_flags",
+        )
+        result = graph.invoke(None, config)
+        status.update(label="✅ Citations retrieved!", state="complete")
+
+    cited_flags = result.get("flags_with_citations", [])
     st.divider()
-    with open(rag_out) as f:
-        enriched = json.load(f)
+    st.subheader(f"📚 Regulatory Citations — {len(cited_flags)} flag(s)")
 
-    flags = enriched.get("anomaly_flags", [])
-    if not flags:
-        st.success("✅ No anomalies detected for this document.")
-    else:
-        summary = enriched.get("anomaly_summary", {})
-        c1, c2, c3 = st.columns(3)
-        c1.metric("🔴 Critical", summary.get("critical", 0))
-        c2.metric("🟡 Warnings", summary.get("warning", 0))
-        c3.metric("Total Flags", summary.get("total", 0))
-
-        st.subheader("Anomaly Flags — Auditor Review")
-        st.caption("Review each flag and the AI-retrieved regulation. Mark your decision.")
-
-        for i, flag in enumerate(flags):
-            sev = flag["severity"]
-            icon = "🔴" if sev == "critical" else "🟡" if sev == "warning" else "🔵"
-            with st.expander(f"{icon} [{flag['rule_id']}] {flag['description'][:80]}...", expanded=(sev == "critical")):
-                col_l, col_r = st.columns(2)
-                with col_l:
-                    st.markdown("**Anomaly Details**")
-                    st.write(f"**Rule:** `{flag['rule_id']}`")
-                    st.write(f"**Severity:** {sev.upper()}")
-                    st.write(f"**Field:** `{flag['field']}`")
-                    if flag.get("expected"):
-                        st.write(f"**Expected:** {flag['expected']}")
-                    if flag.get("actual"):
-                        st.write(f"**Actual:** {flag['actual']}")
-
-                with col_r:
-                    st.markdown("**Retrieved Regulatory Sources**")
-                    for p in flag.get("regulatory_passages", [])[:3]:
-                        st.markdown(
-                            f"📄 `{p['source']}` p.{p['page']} "
-                            f"*(relevance: {p['relevance_score']:.2f})*"
-                        )
-
-                st.markdown("**AI Regulatory Response**")
-                st.info(flag.get("regulatory_response", "—"))
-
-                st.markdown("**Auditor Decision**")
-                decision = st.radio(
-                    "Your assessment:",
-                    ["Confirm — include in report", "Dismiss — not material", "Escalate — needs manual investigation"],
-                    key=f"flag_{i}",
-                    horizontal=True,
+    for flag in cited_flags:
+        rule = flag.get("rule_id", "?")
+        sev  = flag.get("severity", "warning")
+        icon = SEVERITY_ICON.get(sev, "🟡")
+        with st.expander(f"{icon} [{rule}] Regulatory Response", expanded=True):
+            st.markdown("**Retrieved Sources**")
+            for p in flag.get("regulatory_passages", [])[:3]:
+                st.markdown(
+                    f"📄 `{p['source']}` p.{p['page']}  "
+                    f"*(relevance: {p['relevance_score']:.2f})*"
                 )
-                note = st.text_input("Optional note:", key=f"note_{i}")
+            st.markdown("**AI Regulatory Response**")
+            st.info(flag.get("regulatory_response", "—"))
 
-        st.divider()
-        if st.button("✅ Save decisions & proceed to Report Generation", type="primary", use_container_width=True):
-            st.success("Decisions saved! Go to **📄 Report Generation** in the sidebar.")
+    st.divider()
+    st.success("✅ RAG complete! Proceed to **📄 Report Generation** in the sidebar.")

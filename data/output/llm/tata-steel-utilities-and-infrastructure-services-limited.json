@@ -44,7 +44,7 @@
   },
   "profit_and_loss": {
     "revenue_from_operations": 162725.0,
-    "other_income": 4856.0,
+    "other_income": 13394.0,
     "cost_of_materials": null,
     "employee_benefits_expense": 17372.0,
     "finance_costs": 1048.0,
@@ -58,8 +58,8 @@
     "The company has a significant increase in profit after tax, which may be due to higher dividend received in the year and prior year tax.",
     "The company has a high amount of trade receivables, which may indicate a high credit risk.",
     "The company has a significant amount of deferred tax assets, which may indicate a potential tax benefit in the future.",
-    "The company's operating cycle is 12 months, which may indicate a relatively long period for realization of assets and settlement of liabilities.",
-    "The company has a significant increase in cash and cash equivalents, which may indicate a strong liquidity position."
+    "The company's cash and cash equivalents have increased significantly, which may indicate a strong liquidity position.",
+    "The company's debt service coverage ratio has increased, which may indicate a reduced debt burden."
   ],
   "source_file": "tata-steel-utilities-and-infrastructure-services-limited.pdf",
   "extraction_method": "llm",
