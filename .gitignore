@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 token.json
 data/arth_ai_sessions.db*
+data/output/
+data/input/
