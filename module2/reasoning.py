@@ -211,3 +211,42 @@ def complete_financial_json(
     completed["source_file"] = source_file
     completed["extraction_method"] = "llm"
     return completed
+
+
+def _diff_and_tag_sources(partial: dict, completed: dict) -> dict:
+    """
+    Compare partial (Module 1) and completed (LLM) dicts.
+    For every field that was null in partial but non-null in completed → tag 'llm'.
+    For every field that was already filled in partial → preserve existing tag.
+    Returns updated '_sources' dict.
+    """
+    existing_sources = partial.get("_sources", {})
+    new_sources = dict(existing_sources)  # copy regex tags
+
+    def _walk(old, new, path=""):
+        if isinstance(new, dict):
+            for k, v in new.items():
+                _walk(old.get(k) if isinstance(old, dict) else None,
+                      v, f"{path}.{k}" if path else k)
+        elif isinstance(new, (int, float)) and new is not None:
+            dotted = path
+            if dotted not in new_sources:  # wasn't tagged by regex
+                new_sources[dotted] = "llm"
+
+    _walk(partial, completed)
+    return new_sources
+
+
+def complete_financial_json_with_sources(
+    partial_json: dict,
+    raw_text: str,
+    source_file: str = "",
+) -> dict:
+    """
+    Same as complete_financial_json but also builds the _sources audit trail.
+    LLM-filled fields are tagged 'llm', regex-filled stay 'regex'.
+    Use this instead of complete_financial_json going forward.
+    """
+    completed = complete_financial_json(partial_json, raw_text, source_file)
+    completed["_sources"] = _diff_and_tag_sources(partial_json, completed)
+    return completed

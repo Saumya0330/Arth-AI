@@ -210,3 +210,40 @@ def parse_financial_text(
     )
     fs.extraction_confidence = _compute_confidence(fs)
     return fs
+
+
+def _build_sources(fs) -> dict:
+    """
+    Build a flat _sources dict: dotted field path → 'regex' for every
+    non-null value the regex parser extracted.
+    """
+    sources = {}
+    for field in ("company_name", "cin", "financial_year_end", "auditor_name"):
+        if getattr(fs, field) is not None:
+            sources[field] = "regex"
+    bs = fs.balance_sheet
+    for section_name, section_obj in [
+        ("balance_sheet.shareholders_equity",     bs.shareholders_equity),
+        ("balance_sheet.non_current_liabilities", bs.non_current_liabilities),
+        ("balance_sheet.current_liabilities",     bs.current_liabilities),
+        ("balance_sheet.non_current_assets",      bs.non_current_assets),
+        ("balance_sheet.current_assets",          bs.current_assets),
+    ]:
+        for k, v in vars(section_obj).items():
+            if isinstance(v, (int, float)):
+                sources[f"{section_name}.{k}"] = "regex"
+    for k, v in vars(fs.profit_and_loss).items():
+        if isinstance(v, (int, float)):
+            sources[f"profit_and_loss.{k}"] = "regex"
+    return sources
+
+
+def attach_sources(fs_dict: dict) -> dict:
+    """
+    Given a Module 1 output dict, add a top-level '_sources' key.
+    Maps dotted field paths → 'regex' for every value extracted by regex.
+    """
+    from module1.schema import FinancialStatement
+    fs = FinancialStatement.from_dict({k: v for k, v in fs_dict.items()})
+    fs_dict["_sources"] = _build_sources(fs)
+    return fs_dict

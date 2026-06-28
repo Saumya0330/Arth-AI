@@ -71,6 +71,30 @@ if already_past_rag:
 # ── Show anomaly flags from Agent 2 ───────────────────────────────────────────
 flags = state.get("anomaly_flags", [])
 math  = state.get("math_report", {})
+# ── Source verification panel ──────────────────────────────────────────────────
+sources = state.get("field_sources") or {}
+if sources:
+    llm_fields   = {k: v for k, v in sources.items() if v == "llm"}
+    regex_fields  = {k: v for k, v in sources.items() if v == "regex"}
+    with st.expander(
+        f"📋 Field Source Audit Trail — "        f"✅ {len(regex_fields)} regex-extracted  |  "        f"⚠️ {len(llm_fields)} LLM-extracted (need verification)",
+        expanded=len(llm_fields) > 0
+    ):
+        if llm_fields:
+            st.warning(
+                f"{len(llm_fields)} field(s) were filled by the LLM and have NOT "                f"been verified against the source PDF. Review before finalising."
+            )
+            for path in sorted(llm_fields):
+                val = state["financial_json"]
+                for key in path.split("."):
+                    val = val.get(key, "—") if isinstance(val, dict) else "—"
+                st.markdown(f"-  = **{val}** ⚠️ LLM-extracted")
+        if regex_fields:
+            with st.expander(f"✅ {len(regex_fields)} regex-verified fields"):
+                for path in sorted(regex_fields):
+                    st.markdown(f"-  ✅")
+
+
 
 # Math summary banner
 if math.get("has_critical_errors"):
@@ -199,3 +223,12 @@ if col_btn.button("▶ Submit Decisions & Fetch Regulatory Citations",
 
     st.divider()
     st.success("✅ RAG complete! Proceed to **📄 Report Generation** in the sidebar.")
+
+
+def _show_cited_flags(flags):
+    SEVERITY_ICON = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
+    for flag in flags:
+        sev = flag.get("severity", "warning")
+        icon = SEVERITY_ICON.get(sev, "🟡")
+        with st.expander(f"{icon} [{flag.get('rule_id','?')}] {flag.get('description','')[:80]}..."):
+            st.info(flag.get("regulatory_response", "—"))

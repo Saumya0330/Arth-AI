@@ -1,32 +1,22 @@
 """
 अर्थAI — Orchestrator (LangGraph StateGraph)
 
-Defines the pipeline graph and manages all transitions.
-Human interrupt nodes pause the graph at auditor checkpoints.
+Uses SqliteSaver so sessions survive app restarts.
+Sessions DB: data/arth_ai_sessions.db
 
-Graph structure:
-  extract → math_validator → compliance_checker
-                                    ↓
-                          [HUMAN: review_flags]
-                                    ↓
-                            rag_retriever
-                                    ↓
-                          [HUMAN: review_citations]
-                                    ↓
-                            report_drafter
-                                    ↓
-                          [HUMAN: review_report]
-                                    ↓
-                                  END
+Graph:
+  math_validator → compliance_checker
+       → [HUMAN: review_flags]
+       → rag_retriever → report_drafter
+       → [HUMAN: review_report]
+       → END
 """
 
-import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from agents.state import AuditState
 from agents.math_validator     import run_math_validator
@@ -37,65 +27,50 @@ from agents.report_drafter     import run_report_drafter
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+DB_PATH  = BASE_DIR / "data" / "arth_ai_sessions.db"
 
 
-# ── Human interrupt nodes (just pass state through — UI pauses here) ──────────
+# ── Human interrupt nodes ──────────────────────────────────────────────────────
 
 def human_review_flags(state: AuditState) -> AuditState:
     """
     HUMAN CHECKPOINT 1: Auditor reviews anomaly flags.
-    This node is interrupted by LangGraph before execution.
-    When resumed, auditor_flag_decisions must be set in the state.
+    Graph pauses before this node. Resumed by Streamlit after auditor decisions.
     """
     decisions = state.get("auditor_flag_decisions") or {}
     all_flags = state.get("anomaly_flags") or []
 
-    # Keep only flags auditor confirmed or escalated (not dismissed)
     confirmed = [
         f for f in all_flags
         if decisions.get(f["rule_id"], "confirm") != "dismiss"
     ]
-
     logger.info(
-        f"[Orchestrator] Flag review: {len(all_flags)} total, "
+        f"[Orchestrator] Flags: {len(all_flags)} total → "
         f"{len(confirmed)} confirmed/escalated"
     )
-    return {
-        **state,
-        "confirmed_flags": confirmed,
-        "current_step": "flags_reviewed",
-    }
+    return {**state, "confirmed_flags": confirmed, "current_step": "flags_reviewed"}
 
 
 def human_review_report(state: AuditState) -> AuditState:
     """
     HUMAN CHECKPOINT 2: Auditor edits report sections.
-    When resumed, auditor_edits must be set in the state.
+    Graph pauses before this node. Resumed after auditor saves edits.
     """
-    return {
-        **state,
-        "report_finalised": True,
-        "current_step": "report_finalised",
-    }
+    return {**state, "report_finalised": True, "current_step": "report_finalised"}
 
 
-# ── Conditional edge: should we halt after math validation? ───────────────────
+# ── Routing ────────────────────────────────────────────────────────────────────
 
-def should_continue_after_math(state: AuditState) -> str:
-    """
-    If math has critical errors AND no auditor override, pause for review.
-    Otherwise proceed to compliance checking.
-    (For now always continues — math errors are surfaced but don't block pipeline.)
-    """
+def after_math(state: AuditState) -> str:
+    # Math errors surface in the UI but never block the pipeline
     return "compliance_checker"
 
 
-# ── Build the graph ────────────────────────────────────────────────────────────
+# ── Graph builder ──────────────────────────────────────────────────────────────
 
-def build_graph():
+def build_graph(db_path: str):
     graph = StateGraph(AuditState)
 
-    # Add all nodes
     graph.add_node("math_validator",      run_math_validator)
     graph.add_node("compliance_checker",  run_compliance_checker)
     graph.add_node("human_review_flags",  human_review_flags)
@@ -103,30 +78,36 @@ def build_graph():
     graph.add_node("report_drafter",      run_report_drafter)
     graph.add_node("human_review_report", human_review_report)
 
-    # Entry point
     graph.set_entry_point("math_validator")
-
-    # Edges
-    graph.add_conditional_edges(
-        "math_validator",
-        should_continue_after_math,
-        {"compliance_checker": "compliance_checker"},
-    )
+    graph.add_conditional_edges("math_validator", after_math,
+                                {"compliance_checker": "compliance_checker"})
     graph.add_edge("compliance_checker",  "human_review_flags")
     graph.add_edge("human_review_flags",  "rag_retriever")
     graph.add_edge("rag_retriever",       "report_drafter")
     graph.add_edge("report_drafter",      "human_review_report")
     graph.add_edge("human_review_report", END)
 
-    # Interrupt before human nodes — graph pauses here waiting for auditor
-    memory = MemorySaver()
+    checkpointer = SqliteSaver.from_conn_string(db_path)
     return graph.compile(
-        checkpointer=memory,
+        checkpointer=checkpointer,
         interrupt_before=["human_review_flags", "human_review_report"],
     )
 
 
-# ── Convenience runner used by Streamlit ──────────────────────────────────────
+# ── Singleton ──────────────────────────────────────────────────────────────────
+
+_graph = None
+
+def get_graph():
+    global _graph
+    if _graph is None:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _graph = build_graph(str(DB_PATH))
+        logger.info(f"[Orchestrator] Graph built. Session DB: {DB_PATH}")
+    return _graph
+
+
+# ── Initial state factory ──────────────────────────────────────────────────────
 
 def create_initial_state(financial_json: dict, raw_text: str) -> AuditState:
     return AuditState(
@@ -142,16 +123,8 @@ def create_initial_state(financial_json: dict, raw_text: str) -> AuditState:
         report_markdown=None,
         auditor_edits=None,
         report_finalised=False,
+        # Carry source audit trail from Module 1+2
+        field_sources=financial_json.get("_sources", {}),
         current_step="start",
         errors=[],
     )
-
-
-# ── Singleton graph instance ───────────────────────────────────────────────────
-_graph = None
-
-def get_graph():
-    global _graph
-    if _graph is None:
-        _graph = build_graph()
-    return _graph

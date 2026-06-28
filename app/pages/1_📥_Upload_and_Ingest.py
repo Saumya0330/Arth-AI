@@ -77,12 +77,14 @@ with st.status("Running extraction pipeline...", expanded=True) as status:
 
     fs_m1 = parse_financial_text(raw_text, source_file=uploaded.name, extraction_method=method)
     m1_dict = fs_m1.to_dict()
+    from module1.parser import attach_sources
+    m1_dict = attach_sources(m1_dict)
     (BASE_DIR / "data" / "output").mkdir(parents=True, exist_ok=True)
     (BASE_DIR / "data" / "output" / (dest.stem + ".json")).write_text(
         json.dumps(m1_dict, indent=2, default=str))
 
     st.write("**Module 2:** LLM completing financial fields (Groq)...")
-    from module2.reasoning import complete_financial_json
+    from module2.reasoning import complete_financial_json_with_sources as complete_financial_json
     completed = complete_financial_json(m1_dict, raw_text, source_file=uploaded.name)
     OUT_LLM.mkdir(parents=True, exist_ok=True)
     llm_path.write_text(json.dumps(completed, indent=2, default=str))

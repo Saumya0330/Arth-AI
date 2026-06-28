@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from module2.reasoning import complete_financial_json
+from module2.reasoning import complete_financial_json_with_sources as complete_financial_json
 from module1.extractor import get_full_text
 
 logging.basicConfig(

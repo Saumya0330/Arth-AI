@@ -37,5 +37,8 @@ class AuditState(TypedDict):
     report_finalised:   bool
 
     # ── Pipeline metadata ─────────────────────────────────────────────────────
+    # Maps dotted field path → "regex" | "llm" | "auditor_verified"
+    field_sources:      Optional[Dict[str, str]]
+
     current_step:       str             # which node last ran
     errors:             List[str]       # non-fatal errors accumulated
