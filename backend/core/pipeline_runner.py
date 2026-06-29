@@ -30,7 +30,9 @@ def get_state(thread_id: str) -> dict:
     return state
 
 
-def invoke(thread_id: str, update: dict | None = None, as_node: str | None = None):
+from typing import Optional
+
+def invoke(thread_id: str, update: Optional[dict] = None, as_node: Optional[str] = None):
     """
     Resume a paused graph.
     If update is provided, inject it into state first (for human checkpoints).

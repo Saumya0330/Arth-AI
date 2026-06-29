@@ -7,7 +7,7 @@ PUT  /api/financials/{id}        — auditor edits fields → marks auditor_veri
 
 import sys, copy
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ class FieldEdit(BaseModel):
 
 
 class FinancialsUpdateRequest(BaseModel):
-    edits: list[FieldEdit]
+    edits: List[FieldEdit]
 
 
 def _set_nested(d: dict, dotted_path: str, value) -> dict:
