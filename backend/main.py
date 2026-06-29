@@ -1,13 +1,12 @@
 """
 अर्थAI — FastAPI Backend
 
-Run with:
-    cd backend
-    uvicorn main:app --reload --port 8000
+Run from the PROJECT ROOT (~/Desktop/Capstone):
+    ./start_backend.sh
+    OR
+    PYTHONPATH=. uvicorn backend.main:app --reload --port 8000
 
-Docs available at:
-    http://localhost:8000/docs   (Swagger UI)
-    http://localhost:8000/redoc  (ReDoc)
+Docs: http://localhost:8000/docs
 """
 
 import sys
@@ -15,7 +14,12 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Ensure project root is on path regardless of where uvicorn is invoked from
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+load_dotenv(_PROJECT_ROOT / ".env")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
