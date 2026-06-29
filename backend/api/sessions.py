@@ -1,18 +1,16 @@
 """
 अर्थAI — Sessions API
 
-POST /api/sessions/upload   — upload PDF, run extraction, start pipeline
+POST /api/sessions/upload   — upload one or more PDFs/CSVs, run extraction, start pipeline
 GET  /api/sessions          — list all sessions (from SQLite)
 GET  /api/sessions/{id}     — get full state for a session
-DELETE /api/sessions/{id}   — not implemented (sessions are permanent audit trails)
 """
 
-import sys, json, uuid, shutil, sqlite3
+import sys, json, shutil, sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import List
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
 
 BASE_DIR  = Path(__file__).resolve().parent.parent.parent
 INPUT_DIR = BASE_DIR / "data" / "input"
@@ -21,6 +19,8 @@ DB_PATH   = BASE_DIR / "data" / "arth_ai_sessions.db"
 sys.path.insert(0, str(BASE_DIR))
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+ALLOWED_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls"}
 
 
 def _safe_state(state: dict) -> dict:
@@ -31,59 +31,107 @@ def _safe_state(state: dict) -> dict:
 
 
 @router.post("/upload")
-async def upload_and_start(file: UploadFile = File(...)):
+async def upload_and_start(files: List[UploadFile] = File(...)):
     """
-    Upload a financial PDF.
-    Runs Module 1 (extraction) + Module 2 (LLM fill), then kicks off
-    the LangGraph pipeline (math validator + compliance checker).
-    Returns session_id and initial pipeline state.
+    Upload one or more financial documents (PDF, CSV, Excel).
+    All files are extracted and merged into one FinancialStatement JSON.
+    The merged JSON is then passed through Module 2 (LLM) and the agent pipeline.
+    Session ID is derived from the first PDF filename.
     """
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files are accepted.")
+    if not files:
+        raise HTTPException(400, "At least one file is required.")
+
+    # Validate extensions
+    for f in files:
+        ext = Path(f.filename).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(400, f"Unsupported file type: {f.filename}. "
+                                     f"Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
 
     INPUT_DIR.mkdir(parents=True, exist_ok=True)
-    dest = INPUT_DIR / file.filename
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    (BASE_DIR / "data" / "output").mkdir(parents=True, exist_ok=True)
 
-    # Module 1 — extract
     from module1.extractor import get_full_text
     from module1.parser import parse_financial_text, attach_sources
-    raw_text, method = get_full_text(str(dest))
-    fs_m1 = parse_financial_text(raw_text, source_file=file.filename,
-                                 extraction_method=method)
-    m1_dict = attach_sources(fs_m1.to_dict())
-    (BASE_DIR / "data" / "output").mkdir(parents=True, exist_ok=True)
-    (BASE_DIR / "data" / "output" / (dest.stem + ".json")).write_text(
-        json.dumps(m1_dict, indent=2, default=str))
-
-    # Module 2 — LLM fill
+    from module1.csv_extractor import extract_from_csv
+    from module1.merger import merge_financial_dicts
     from module2.reasoning import complete_financial_json_with_sources
+    from backend.core.pipeline_runner import start_pipeline
+
+    partial_dicts = []
+    all_raw_text  = []
+    primary_stem  = None   # used as thread_id
+    primary_method = "text"
+
+    for upload in files:
+        dest = INPUT_DIR / upload.filename
+        with open(dest, "wb") as fh:
+            shutil.copyfileobj(upload.file, fh)
+
+        ext = dest.suffix.lower()
+
+        if ext == ".pdf":
+            raw_text, method = get_full_text(str(dest))
+            all_raw_text.append(raw_text)
+            fs = parse_financial_text(raw_text, source_file=upload.filename,
+                                      extraction_method=method)
+            d = attach_sources(fs.to_dict())
+            d["_source_file"] = upload.filename
+            partial_dicts.append(d)
+
+            # First PDF sets the session identity
+            if primary_stem is None:
+                primary_stem   = dest.stem
+                primary_method = method
+
+        else:  # CSV / Excel
+            partial, csv_sources = extract_from_csv(str(dest))
+            partial["_sources"]     = csv_sources
+            partial["_source_file"] = upload.filename
+            partial_dicts.append(partial)
+
+    if primary_stem is None:
+        # No PDF uploaded — use first file stem
+        primary_stem = Path(files[0].filename).stem
+
+    # Merge all partial dicts
+    if len(partial_dicts) == 1:
+        merged = partial_dicts[0]
+    else:
+        merged = merge_financial_dicts(partial_dicts)
+
+    merged["source_file"]        = ", ".join(f.filename for f in files)
+    merged["extraction_method"]  = primary_method
+
+    # Save Module 1 output
+    (BASE_DIR / "data" / "output" / f"{primary_stem}.json").write_text(
+        json.dumps(merged, indent=2, default=str))
+
+    # Module 2 — LLM fill on merged data
+    combined_text = "\n\n".join(all_raw_text)
     completed = complete_financial_json_with_sources(
-        m1_dict, raw_text, source_file=file.filename)
+        merged, combined_text, source_file=merged["source_file"])
     OUT_LLM.mkdir(parents=True, exist_ok=True)
-    (OUT_LLM / (dest.stem + ".json")).write_text(
+    (OUT_LLM / f"{primary_stem}.json").write_text(
         json.dumps(completed, indent=2, default=str))
 
-    # Deterministic thread_id from filename
-    thread_id = dest.stem
-
     # Start pipeline
-    from backend.core.pipeline_runner import start_pipeline
-    result = start_pipeline(completed, raw_text, thread_id)
+    result = start_pipeline(completed, combined_text, primary_stem)
 
     return {
-        "session_id":    thread_id,
-        "company_name":  completed.get("company_name"),
-        "financial_year": completed.get("financial_year_end"),
-        "extraction_confidence": completed.get("extraction_confidence"),
-        "extraction_method": method,
-        "current_step":  result.get("current_step"),
-        "next_nodes":    result.get("_next_nodes", []),
-        "math_report":   result.get("math_report"),
-        "anomaly_flags": result.get("anomaly_flags", []),
-        "field_sources": result.get("field_sources", {}),
+        "session_id":             primary_stem,
+        "source_files":           [f.filename for f in files],
+        "company_name":           completed.get("company_name"),
+        "financial_year":         completed.get("financial_year_end"),
+        "extraction_confidence":  completed.get("extraction_confidence"),
+        "extraction_method":      primary_method,
+        "current_step":           result.get("current_step"),
+        "next_nodes":             result.get("_next_nodes", []),
+        "math_report":            result.get("math_report"),
+        "anomaly_flags":          result.get("anomaly_flags", []),
+        "field_sources":          result.get("field_sources", {}),
     }
+
 
 
 @router.get("")

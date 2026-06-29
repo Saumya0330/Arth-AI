@@ -58,9 +58,10 @@ export interface RulebookDoc {
 
 // ── Sessions ───────────────────────────────────────────────────────────────────
 
-export const uploadPDF = (file: File) => {
+export const uploadPDF = (files: File | File[]) => {
   const form = new FormData()
-  form.append('file', file)
+  const arr = Array.isArray(files) ? files : [files]
+  arr.forEach(f => form.append('files', f))
   return api.post('/sessions/upload', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then(r => r.data)
